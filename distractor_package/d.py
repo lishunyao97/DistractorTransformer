@@ -642,7 +642,8 @@ class DecoderLayer(nn.Module):
 
         self.layer_norm = nn.LayerNorm(hid_dim)
         self.self_attention = MultiHeadAttentionLayer(hid_dim, n_heads, dropout, device)
-        self.encoder_attention = MultiHeadAttentionLayer(hid_dim, n_heads, dropout, device)
+        self.doc_encoder_attention = MultiHeadAttentionLayer(hid_dim, n_heads, dropout, device)
+        self.ques_encoder_attention = MultiHeadAttentionLayer(hid_dim, n_heads, dropout, device)
         self.positionwise_feedforward = PositionwiseFeedforwardLayer(hid_dim,
                                                                      pf_dim,
                                                                      dropout)
@@ -664,7 +665,7 @@ class DecoderLayer(nn.Module):
         #trg = [batch size, trg len, hid dim]
 
         #encoder attention
-        _trg, attention = self.encoder_attention(trg, doc_enc_src, doc_enc_src, doc_src_mask)
+        _trg, attention = self.doc_encoder_attention(trg, doc_enc_src, doc_enc_src, doc_src_mask)
 
         #dropout, residual connection and layer norm
         trg = self.layer_norm(trg + self.dropout(_trg))
@@ -672,7 +673,7 @@ class DecoderLayer(nn.Module):
         #trg = [batch size, trg len, hid dim]
 
         #encoder attention
-        _trg, attention = self.encoder_attention(trg, ques_enc_src, ques_enc_src, ques_src_mask)
+        _trg, attention = self.ques_encoder_attention(trg, ques_enc_src, ques_enc_src, ques_src_mask)
 
         #dropout, residual connection and layer norm
         trg = self.layer_norm(trg + self.dropout(_trg))
@@ -1064,7 +1065,7 @@ def translate_sentence(question, document, src_field, trg_field, model, device, 
         trg_mask = model.make_trg_mask(trg_tensor)
 
         with torch.no_grad():
-            output, attention = model.decoder(trg_tensor, ques_enc_src, trg_mask, ques_src_mask)
+            output, attention = model.decoder(trg_tensor, doc_enc_src, ques_enc_src, trg_mask, doc_src_mask, ques_src_mask)
 
         pred_token = output.argmax(2)[:,-1].item()
 
