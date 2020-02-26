@@ -46,10 +46,10 @@ As always, let's import all the required modules and set the random seeds for re
 datasetDir = '/home/ubuntu/DistractorTransformer/distractor_package/distractor'
 batch_size = 32
 N_EPOCHS = 15
-CLIP = 0.9
+CLIP = 1.0
 LEARNING_RATE = 0.0001
-LR_DECAY = 0.5
-LR_DECAY_EPOCH = 2
+LR_DECAY = 1.0
+LR_DECAY_EPOCH = 5
 
 import json
 def getmaxlen(field):
@@ -588,7 +588,7 @@ class Decoder(nn.Module):
 
         self.scale = torch.sqrt(torch.FloatTensor([hid_dim])).to(self.device)
 
-    def forward(self, trg, enc_src, trg_mask, src_mask):
+    def forward(self, trg, doc_enc_src, ques_enc_src, trg_mask, doc_src_mask, ques_src_mask):
 
         #trg = [batch size, trg len]
         #enc_src = [batch size, src len, hid dim]
@@ -607,7 +607,7 @@ class Decoder(nn.Module):
         #trg = [batch size, trg len, hid dim]
 
         for layer in self.layers:
-            trg, attention = layer(trg, enc_src, trg_mask, src_mask)
+            trg, attention = layer(trg, doc_enc_src, ques_enc_src, trg_mask, doc_src_mask, ques_src_mask)
 
         #trg = [batch size, trg len, hid dim]
         #attention = [batch size, n heads, trg len, src len]
@@ -648,7 +648,7 @@ class DecoderLayer(nn.Module):
                                                                      dropout)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, trg, enc_src, trg_mask, src_mask):
+    def forward(self, trg, doc_enc_src, ques_enc_src, trg_mask, doc_src_mask, ques_src_mask):
 
         #trg = [batch size, trg len, hid dim]
         #enc_src = [batch size, src len, hid dim]
@@ -664,12 +664,18 @@ class DecoderLayer(nn.Module):
         #trg = [batch size, trg len, hid dim]
 
         #encoder attention
-        _trg, attention = self.encoder_attention(trg, enc_src, enc_src, src_mask)
+        _trg, attention = self.encoder_attention(trg, doc_enc_src, doc_enc_src, doc_src_mask)
 
         #dropout, residual connection and layer norm
         trg = self.layer_norm(trg + self.dropout(_trg))
 
         #trg = [batch size, trg len, hid dim]
+
+        #encoder attention
+        _trg, attention = self.encoder_attention(trg, ques_enc_src, ques_enc_src, ques_src_mask)
+
+        #dropout, residual connection and layer norm
+        trg = self.layer_norm(trg + self.dropout(_trg))
 
         #positionwise feedforward
         _trg = self.positionwise_feedforward(trg)
@@ -777,7 +783,7 @@ class Seq2Seq(nn.Module):
 
         #enc_src = [batch size, src len, hid dim]
 
-        output, attention = self.decoder(trg, ques_enc_src, trg_mask, ques_src_mask)
+        output, attention = self.decoder(trg, doc_enc_src, ques_enc_src, trg_mask, doc_src_mask, ques_src_mask)
 
         #output = [batch size, trg len, output dim]
         #attention = [batch size, n heads, trg len, src len]
