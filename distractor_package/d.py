@@ -43,7 +43,7 @@ As always, let's import all the required modules and set the random seeds for re
 # !ls drive/
 # datasetDir = 'drive/My Drive/distractor'
 # datasetDir = '/Users/lishunyao/Desktop/SmartReader/Distractor-Generation-RACE-master/data/distractor'
-datasetDir = '/home/ubuntu/distractor_package/distractor'
+datasetDir = '/home/ubuntu/DistractorTransformer/distractor_package/distractor'
 batch_size = 32
 N_EPOCHS = 30
 CLIP = 1
@@ -855,7 +855,7 @@ Note that the learning rate needs to be lower than the default used by Adam or e
 
 
 optimizer = torch.optim.Adam(model.parameters(), lr = LEARNING_RATE)
-scheduler = lr_scheduler.StepLR(optimizer, 5, LR_DECAY)
+scheduler = lr_scheduler.StepLR(optimizer, step_size=5*(len(train_set)//batch_size), gamma=LR_DECAY)
 
 """Next, we define our loss function, making sure to ignore losses calculated over `<pad>` tokens."""
 
