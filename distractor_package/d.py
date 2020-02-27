@@ -45,7 +45,7 @@ As always, let's import all the required modules and set the random seeds for re
 # datasetDir = '/Users/lishunyao/Desktop/SmartReader/Distractor-Generation-RACE-master/data/distractor'
 datasetDir = '/home/ubuntu/DistractorTransformer/distractor_package/distractor'
 batch_size = 32
-N_EPOCHS = 15
+N_EPOCHS = 5
 CLIP = 1.0
 LEARNING_RATE = 0.0001
 LR_DECAY = 1.0
