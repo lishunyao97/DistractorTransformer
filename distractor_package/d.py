@@ -178,6 +178,56 @@ The combined embeddings are then passed through $N$ *encoder layers* to get $Z$,
 
 The source mask, `src_mask`, is simply the same shape as the source sentence but has a value of 1 when the token in the source sentence is not a `<pad>` token and 0 when it is a `<pad>` token. This is used in the encoder layers to mask the multi-head attention mechanisms, which are used to calculate and apply attention over the source sentence, so the model does not pay attention to `<pad>` tokens, which contain no useful information.
 """
+class AnswerEncoder(nn.Module):
+    def __init__(self,
+                 input_dim,
+                 hid_dim,
+                 n_layers,
+                 n_heads,
+                 pf_dim,
+                 dropout,
+                 device,
+                 max_length = 50):
+        super().__init__()
+
+        self.device = device
+
+        self.tok_embedding = nn.Embedding(input_dim, hid_dim)
+        self.pos_embedding = nn.Embedding(max_length, hid_dim)
+
+        self.layers = nn.ModuleList([AnswerEncoderLayer(hid_dim,
+                                                  n_heads,
+                                                  pf_dim,
+                                                  dropout,
+                                                  device)
+                                     for _ in range(n_layers)])
+
+        self.dropout = nn.Dropout(dropout)
+
+        self.scale = torch.sqrt(torch.FloatTensor([hid_dim])).to(device)
+
+    def forward(self, src, src_mask):
+
+        #src = [batch size, src len]
+        #src_mask = [batch size, src len]
+
+        batch_size = src.shape[0]
+        src_len = src.shape[1]
+
+        pos = torch.arange(0, src_len).unsqueeze(0).repeat(batch_size, 1).to(self.device)
+
+        #pos = [batch size, src len]
+
+        src = self.dropout((self.tok_embedding(src) * self.scale) + self.pos_embedding(pos))
+
+        #src = [batch size, src len, hid dim]
+
+        for layer in self.layers:
+            src = layer(src, src_mask)
+
+        #src = [batch size, src len, hid dim]
+
+        return src
 
 class DocumentEncoder(nn.Module):
     def __init__(self,
@@ -329,7 +379,7 @@ class EncoderLayer(nn.Module):
 
         return src
 
-class DocumentEncoderLayer(nn.Module):
+class AnswerEncoderLayer(nn.Module):
     def __init__(self,
                  hid_dim,
                  n_heads,
@@ -358,6 +408,50 @@ class DocumentEncoderLayer(nn.Module):
 
         #src = [batch size, src len, hid dim]
 
+        #positionwise feedforward
+        _src = self.positionwise_feedforward(src)
+
+        #dropout, residual and layer norm
+        src = self.layer_norm(src + self.dropout(_src))
+
+        #src = [batch size, src len, hid dim]
+
+        return src
+
+class DocumentEncoderLayer(nn.Module):
+    def __init__(self,
+                 hid_dim,
+                 n_heads,
+                 pf_dim,
+                 dropout,
+                 device):
+        super().__init__()
+
+        self.layer_norm = nn.LayerNorm(hid_dim)
+        self.self_attention = MultiHeadAttentionLayer(hid_dim, n_heads, dropout, device)
+        self.encoder_attention = MultiHeadAttentionLayer(hid_dim, n_heads, dropout, device)
+        self.positionwise_feedforward = PositionwiseFeedforwardLayer(hid_dim,
+                                                                     pf_dim,
+                                                                     dropout)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, src, enc_ans, src_mask, ans_mask):
+
+        #src = [batch size, src len, hid dim]
+        #src_mask = [batch size, src len]
+
+        #self attention
+        _src, _ = self.self_attention(src, src, src, src_mask)
+
+        #dropout, residual connection and layer norm
+        src = self.layer_norm(src + self.dropout(_src))
+
+        #src = [batch size, src len, hid dim]
+        #encoder attention
+        _src, attention = self.encoder_attention(src, enc_ans, enc_ans, ans_mask)
+
+        #dropout, residual connection and layer norm
+        src = self.layer_norm(src + self.dropout(_src))
         #positionwise feedforward
         _src = self.positionwise_feedforward(src)
 
@@ -727,6 +821,7 @@ After the masks are created, they used with the encoder and decoder along with t
 
 class Seq2Seq(nn.Module):
     def __init__(self,
+                 ans_encoder,
                  doc_encoder,
                  ques_encoder,
                  decoder,
@@ -734,7 +829,7 @@ class Seq2Seq(nn.Module):
                  trg_pad_idx,
                  device):
         super().__init__()
-
+        self.ans_encoder = ans_encoder
         self.doc_encoder = doc_encoder
         self.ques_encoder = ques_encoder
         self.decoder = decoder
@@ -772,19 +867,19 @@ class Seq2Seq(nn.Module):
 
         return trg_mask
 
-    def forward(self, doc_src, ques_src, trg):
+    def forward(self, ans_src, doc_src, ques_src, trg):
 
         #src = [batch size, src len]
         #trg = [batch size, trg len]
-
+        ans_src_mask = self.make_src_mask(ans_src)
         doc_src_mask = self.make_src_mask(doc_src)
         ques_src_mask = self.make_src_mask(ques_src)
         trg_mask = self.make_trg_mask(trg)
 
         #src_mask = [batch size, 1, 1, src len]
         #trg_mask = [batch size, 1, trg len, trg len]
-
-        doc_enc_src = self.doc_encoder(doc_src, doc_src_mask)
+        ans_enc_src = self.ans_encoder(ans_src, ans_src_mask)
+        doc_enc_src = self.doc_encoder(doc_src, ans_enc_src, doc_src_mask, ans_src_mask)
         ques_enc_src = self.ques_encoder(ques_src, doc_enc_src, ques_src_mask, doc_src_mask)
 
         #enc_src = [batch size, src len, hid dim]
@@ -812,6 +907,13 @@ ENC_PF_DIM = 512
 DEC_PF_DIM = 512
 ENC_DROPOUT = 0.1
 DEC_DROPOUT = 0.1
+ans_enc = AnswerEncoder(INPUT_DIM,
+              HID_DIM,
+              ENC_LAYERS,
+              ENC_HEADS,
+              ENC_PF_DIM,
+              ENC_DROPOUT,
+              device)
 
 doc_enc = DocumentEncoder(INPUT_DIM,
               HID_DIM,
@@ -843,7 +945,7 @@ dec = Decoder(OUTPUT_DIM,
 # TRG_PAD_IDX = TRG.vocab.stoi[TRG.pad_token]
 TEXT_PAD_IDX = TEXT.vocab.stoi[TEXT.pad_token]
 
-model = Seq2Seq(doc_enc, ques_enc, dec, TEXT_PAD_IDX, TEXT_PAD_IDX, device).to(device)
+model = Seq2Seq(ans_enc, doc_enc, ques_enc, dec, TEXT_PAD_IDX, TEXT_PAD_IDX, device).to(device)
 
 """We can check the number of parameters, noticing it is significantly less than the 37M for the convolutional sequence-to-sequence model."""
 
@@ -906,14 +1008,14 @@ def train(model, iterator, optimizer, scheduler, criterion, clip):
     epoch_loss = 0
 
     for i, batch in enumerate(iterator):
-
+        ans_src = batch.answer_text
         doc_src = batch.article
         ques_src = batch.question
         trg = batch.distractor
 
         optimizer.zero_grad()
 
-        output, _ = model(doc_src, ques_src, trg[:,:-1])
+        output, _ = model(ans_src, doc_src, ques_src, trg[:,:-1])
 
         #output = [batch size, trg len - 1, output dim]
         #trg = [batch size, trg len]
@@ -950,12 +1052,12 @@ def evaluate(model, iterator, criterion):
     with torch.no_grad():
 
         for i, batch in enumerate(iterator):
-
+            ans_src = batch.answer_text
             doc_src = batch.article
             ques_src = batch.question
             trg = batch.distractor
 
-            output, _ = model(doc_src, ques_src, trg[:,:-1])
+            output, _ = model(ans_src, doc_src, ques_src, trg[:,:-1])
 
             #output = [batch size, trg len - 1, output dim]
             #trg = [batch size, trg len]
@@ -1050,15 +1152,16 @@ def create_src_tensor(sentence, src_field):
 
     return src_tensor, src_mask
 
-def translate_sentence(question, document, src_field, trg_field, model, device, max_len = 100):
+def translate_sentence(answer, question, document, src_field, trg_field, model, device, max_len = 100):
 
     model.eval()
-
+    ans_tensor, ans_src_mask = create_src_tensor(answer, src_field)
     ques_tensor, ques_src_mask = create_src_tensor(question, src_field)
     doc_tensor, doc_src_mask = create_src_tensor(document, src_field)
 
     with torch.no_grad():
-        doc_enc_src = model.doc_encoder(doc_tensor, doc_src_mask)
+        ans_enc_src = model.ans_encoder(ans_tensor, ans_src_mask)
+        doc_enc_src = model.doc_encoder(doc_tensor, ans_enc_src, doc_src_mask, ans_src_mask)
         ques_enc_src = model.ques_encoder(ques_tensor, doc_enc_src, ques_src_mask, doc_src_mask)
 
     trg_indexes = [trg_field.vocab.stoi[trg_field.init_token]]
@@ -1117,13 +1220,15 @@ example_idx = 8
 ques = vars(train_set.examples[example_idx])['question']
 doc = vars(train_set.examples[example_idx])['article']
 dis = vars(train_set.examples[example_idx])['distractor']
-
+ans = vars(train_set.examples[example_idx])['answer_text']
 print(f'ques = {ques}')
+print(f'ans = {ans}')
 print(f'dis = {dis}')
+
 
 """Our translation looks pretty good, although our model changes *is walking by* to *walks past*. The meaning is still the same."""
 
-translation, attention = translate_sentence(ques, doc, TEXT, TEXT, model, device)
+translation, attention = translate_sentence(ans, ques, doc, TEXT, TEXT, model, device)
 
 print(f'predicted trg = {translation}')
 
@@ -1138,13 +1243,14 @@ example_idx = 6
 ques = vars(valid_set.examples[example_idx])['question']
 doc = vars(valid_set.examples[example_idx])['article']
 dis = vars(valid_set.examples[example_idx])['distractor']
-
+ans = vars(train_set.examples[example_idx])['answer_text']
 print(f'ques = {ques}')
+print(f'ans = {ans}')
 print(f'dis = {dis}')
 
 """The model translates it by switching *is running* to just *running*, but it is an acceptable swap."""
 
-translation, attention = translate_sentence(ques, doc, TEXT, TEXT, model, device)
+translation, attention = translate_sentence(ans, ques, doc, TEXT, TEXT, model, device)
 
 print(f'predicted trg = {translation}')
 
@@ -1159,13 +1265,14 @@ example_idx = 10
 ques = vars(test_set.examples[example_idx])['question']
 doc = vars(test_set.examples[example_idx])['article']
 dis = vars(test_set.examples[example_idx])['distractor']
-
+ans = vars(train_set.examples[example_idx])['answer_text']
 print(f'ques = {ques}')
+print(f'ans = {ans}')
 print(f'dis = {dis}')
 
 """A decent translation with *young* being omitted and *outside* being changed to *outdoors*."""
 
-translation, attention = translate_sentence(ques, doc, TEXT, TEXT, model, device)
+translation, attention = translate_sentence(ans, ques, doc, TEXT, TEXT, model, device)
 
 print(f'predicted trg = {translation}')
 
@@ -1188,9 +1295,9 @@ def calculate_bleu(data, src_field, trg_field, model, device, max_len = 100):
         ques = vars(datum)['question']
         doc = vars(datum)['article']
         trg = vars(datum)['distractor']
+        ans = vars(datum)['answer_text']
 
-
-        pred_trg, _ = translate_sentence(ques, doc, src_field, trg_field, model, device, max_len)
+        pred_trg, _ = translate_sentence(ans, ques, doc, src_field, trg_field, model, device, max_len)
 
         #cut off <eos> token
         pred_trg = pred_trg[:-1]
@@ -1198,7 +1305,7 @@ def calculate_bleu(data, src_field, trg_field, model, device, max_len = 100):
         pred_trgs.append(pred_trg)
         trgs.append([trg])
 
-    return bleu_score(pred_trgs, trgs)
+    return bleu_score(pred_trgs, trgs, max_n=1, weights=[1.0])
 
 """We get a BLEU score of 36.1, which beats the 33.3 of the convolutional sequence-to-sequence model and 28.2 of the attention based RNN model. All this whilst having the least amount of parameters and the fastest training time!"""
 
