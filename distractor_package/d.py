@@ -43,7 +43,7 @@ As always, let's import all the required modules and set the random seeds for re
 # !ls drive/
 # datasetDir = 'drive/My Drive/distractor'
 # datasetDir = '/Users/lishunyao/Desktop/SmartReader/Distractor-Generation-RACE-master/data/distractor'
-datasetDir = '/home/ubuntu/DistractorTransformer/distractor_package/distractor'
+datasetDir = '/home/ubuntu/DistractorTransformer/distractor_package/RACE_BLEU'
 batch_size = 32
 N_EPOCHS = 5
 CLIP = 1.0
@@ -119,6 +119,7 @@ TEXT = data.Field(init_token = '<sos>',
             eos_token = '<eos>',
             lower = True,
             batch_first = True)
+SCORE = data.Field(sequential=False, dtype=torch.double, batch_first=True, use_vocab=False, preprocessing=float)
 
 train_set, valid_set, test_set = data.TabularDataset.splits(
     path=datasetDir, train='race_train.json',
@@ -126,12 +127,15 @@ train_set, valid_set, test_set = data.TabularDataset.splits(
     fields={'question': ('question', TEXT),
             'answer_text': ('answer_text', TEXT),
             'article': ('article', TEXT),
-            'distractor': ('distractor', TEXT)})
+            'distractor': ('distractor', TEXT),
+            'bleu-1': ('bleu1', SCORE)})
 
-train_iterator, valid_iterator, test_iterator = data.BucketIterator.splits(
-    (train_set, valid_set, test_set), batch_sizes=(batch_size, batch_size, batch_size),
-    sort_key=lambda x: len(x.question), device=device)
-
+# train_iterator, valid_iterator, test_iterator = data.BucketIterator.splits(
+#     (train_set, valid_set, test_set), batch_sizes=(batch_size, batch_size, batch_size),
+#     sort_key=lambda x: len(x.question), device=device)
+train_iterator = data.Iterator(train_set, batch_size=batch_size, sort_key=lambda x: len(x.question), shuffle=True, device=device)
+valid_iterator = data.Iterator(valid_set, batch_size=batch_size, sort_key=lambda x: len(x.question), shuffle=True, device=device)
+test_iterator = data.Iterator(test_set, batch_size=batch_size, sort_key=lambda x: len(x.question), shuffle=False, device=device)
 # TEXT.build_vocab(train.question, train.answer_text, train.article, train.distractor,
 #                  valid.question, valid.answer_text, valid.article, valid.diatractor)
 TEXT.build_vocab(train_set, valid_set, min_freq=3)
@@ -145,9 +149,10 @@ example_idx = 8
 ques = vars(train_set.examples[example_idx])['question']
 doc = vars(train_set.examples[example_idx])['article']
 dis = vars(train_set.examples[example_idx])['distractor']
-
+bleu1 = vars(train_set.examples[example_idx])['bleu1']
 print(f'question = {ques}')
 print(f'distractor = {dis}')
+print(f'bleu1 score = {bleu1}')
 
 """We then load the Multi30k dataset and build the vocabulary.
 
