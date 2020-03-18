@@ -45,7 +45,7 @@ As always, let's import all the required modules and set the random seeds for re
 # datasetDir = '/Users/lishunyao/Desktop/SmartReader/Distractor-Generation-RACE-master/data/distractor'
 datasetDir = '/home/ubuntu/DistractorTransformer/distractor_package/RACE_BLEU'
 batch_size = 32
-N_EPOCHS = 5
+N_EPOCHS = 10
 CLIP = 1.0
 LEARNING_RATE = 0.0001
 LR_DECAY = 1.0
@@ -146,11 +146,13 @@ print('len(TEXT.vocab)', len(TEXT.vocab))
 
 example_idx = 8
 
+ans = vars(train_set.examples[example_idx])['answer_text']
 ques = vars(train_set.examples[example_idx])['question']
 doc = vars(train_set.examples[example_idx])['article']
 dis = vars(train_set.examples[example_idx])['distractor']
 bleu1 = vars(train_set.examples[example_idx])['bleu1']
 print(f'question = {ques}')
+print(f'answer = {ans}')
 print(f'distractor = {dis}')
 print(f'bleu1 score = {bleu1}')
 
@@ -257,7 +259,7 @@ class DocumentEncoder(nn.Module):
 
         self.scale = torch.sqrt(torch.FloatTensor([hid_dim])).to(device)
 
-    def forward(self, src, src_mask):
+    def forward(self, src, ans_enc, src_mask, ans_mask):
 
         #src = [batch size, src len]
         #src_mask = [batch size, src len]
@@ -274,7 +276,7 @@ class DocumentEncoder(nn.Module):
         #src = [batch size, src len, hid dim]
 
         for layer in self.layers:
-            src = layer(src, src_mask)
+            src = layer(src, ans_enc, src_mask, ans_mask)
 
         #src = [batch size, src len, hid dim]
 
@@ -907,6 +909,7 @@ ENC_PF_DIM = 512
 DEC_PF_DIM = 512
 ENC_DROPOUT = 0.1
 DEC_DROPOUT = 0.1
+
 ans_enc = AnswerEncoder(INPUT_DIM,
               HID_DIM,
               ENC_LAYERS,
