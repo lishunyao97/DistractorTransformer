@@ -47,7 +47,7 @@ datasetDir = '/home/ubuntu/DistractorTransformer/distractor_package/RACE_BLEU'
 batch_size = 32
 N_EPOCHS = 10
 CLIP = 1.0
-LEARNING_RATE = 0.0001
+LEARNING_RATE = 1e-4
 LR_DECAY = 1.0
 LR_DECAY_EPOCH = 5
 
@@ -705,7 +705,7 @@ class Decoder(nn.Module):
 
         bleu_tensor = bleu.unsqueeze(1).unsqueeze(2).repeat(1, trg_len, self.hid_dim).to(self.device)
         # print('bleu linear', self.bleu_linear(bleu_tensor).shape)
-        trg = self.dropout((self.tok_embedding(trg) * self.scale) + self.pos_embedding(pos) + self.bleu_linear(bleu_tensor))
+        trg = self.dropout((self.tok_embedding(trg) * self.scale) + self.pos_embedding(pos)) + self.bleu_linear(bleu_tensor)
 
         #trg = [batch size, trg len, hid dim]
 
@@ -1172,7 +1172,7 @@ def translate_sentence(answer, question, document, bleu, src_field, trg_field, m
 
         trg_mask = model.make_trg_mask(trg_tensor)
 
-        bleu_tensor = torch.FloatTensor([bleu]).unsqueeze(0).to(device)
+        bleu_tensor = torch.FloatTensor([bleu]).to(device)
 
         with torch.no_grad():
             output, attention = model.decoder(trg_tensor, bleu_tensor, ques_enc_src, trg_mask, ques_src_mask)
