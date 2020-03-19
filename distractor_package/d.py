@@ -189,7 +189,7 @@ class AnswerEncoder(nn.Module):
                  pf_dim,
                  dropout,
                  device,
-                 max_length = 50):
+                 max_length = 42):
         super().__init__()
 
         self.device = device
@@ -291,7 +291,7 @@ class QuestionEncoder(nn.Module):
                  pf_dim,
                  dropout,
                  device,
-                 max_length = 100):
+                 max_length = 72):
         super().__init__()
 
         self.device = device
@@ -668,7 +668,7 @@ class Decoder(nn.Module):
                  pf_dim,
                  dropout,
                  device,
-                 max_length = 100):
+                 max_length = 80):
         super().__init__()
 
         self.device = device

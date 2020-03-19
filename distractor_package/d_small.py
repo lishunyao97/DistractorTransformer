@@ -43,7 +43,7 @@ As always, let's import all the required modules and set the random seeds for re
 # !ls drive/
 # datasetDir = 'drive/My Drive/distractor'
 # datasetDir = '/Users/lishunyao/Desktop/SmartReader/Distractor-Generation-RACE-master/data/distractor'
-datasetDir = '/home/ubuntu/DistractorTransformer/distractor_package/distractor'
+datasetDir = '/home/ubuntu/DistractorTransformer/distractor_package/RACE_BLEU'
 batch_size = 32
 N_EPOCHS = 10
 CLIP = 1.0
@@ -119,7 +119,7 @@ TEXT = data.Field(init_token = '<sos>',
             eos_token = '<eos>',
             lower = True,
             batch_first = True)
-SCORE = data.Field(sequential=False, dtype=torch.double, batch_first=True, use_vocab=False, preprocessing=float)
+SCORE = data.Field(sequential=False, dtype=torch.float, batch_first=True, use_vocab=False, preprocessing=float)
 
 train_set, valid_set, test_set = data.TabularDataset.splits(
     path=datasetDir, train='race_train.json',
@@ -188,7 +188,7 @@ class AnswerEncoder(nn.Module):
                  pf_dim,
                  dropout,
                  device,
-                 max_length = 50):
+                 max_length = 42):
         super().__init__()
 
         self.device = device
@@ -291,7 +291,7 @@ class QuestionEncoder(nn.Module):
                  pf_dim,
                  dropout,
                  device,
-                 max_length = 100):
+                 max_length = 72):
         super().__init__()
 
         self.device = device
@@ -668,11 +668,11 @@ class Decoder(nn.Module):
                  pf_dim,
                  dropout,
                  device,
-                 max_length = 100):
+                 max_length = 80):
         super().__init__()
 
         self.device = device
-
+        self.hid_dim = hid_dim
         self.tok_embedding = nn.Embedding(output_dim, hid_dim)
         self.pos_embedding = nn.Embedding(max_length, hid_dim)
 
@@ -689,7 +689,7 @@ class Decoder(nn.Module):
 
         self.scale = torch.sqrt(torch.FloatTensor([hid_dim])).to(self.device)
 
-    def forward(self, trg, enc_src, trg_mask, src_mask):
+    def forward(self, trg, bleu, enc_src, trg_mask, src_mask):
 
         #trg = [batch size, trg len]
         #enc_src = [batch size, src len, hid dim]
@@ -703,7 +703,9 @@ class Decoder(nn.Module):
 
         #pos = [batch size, trg len]
 
-        trg = self.dropout((self.tok_embedding(trg) * self.scale) + self.pos_embedding(pos))
+        bleu_tensor = bleu.unsqueeze(1).unsqueeze(2).repeat(1, trg_len, self.hid_dim).to(self.device)
+        # print('bleu tensor', bleu_tensor.shape)
+        trg = self.dropout((self.tok_embedding(trg) * self.scale) + self.pos_embedding(pos)) + bleu_tensor
 
         #trg = [batch size, trg len, hid dim]
 
@@ -862,7 +864,7 @@ class Seq2Seq(nn.Module):
 
         return trg_mask
 
-    def forward(self, ans_src, doc_src, ques_src, trg):
+    def forward(self, ans_src, doc_src, ques_src, trg, bleu):
 
         #src = [batch size, src len]
         #trg = [batch size, trg len]
@@ -879,7 +881,7 @@ class Seq2Seq(nn.Module):
 
         #enc_src = [batch size, src len, hid dim]
 
-        output, attention = self.decoder(trg, ques_enc_src, trg_mask, ques_src_mask)
+        output, attention = self.decoder(trg, bleu, ques_enc_src, trg_mask, ques_src_mask)
 
         #output = [batch size, trg len, output dim]
         #attention = [batch size, n heads, trg len, src len]
@@ -1008,10 +1010,11 @@ def train(model, iterator, optimizer, scheduler, criterion, clip):
         doc_src = batch.article
         ques_src = batch.question
         trg = batch.distractor
+        bleu = batch.bleu1
 
         optimizer.zero_grad()
 
-        output, _ = model(ans_src, doc_src, ques_src, trg[:,:-1])
+        output, _ = model(ans_src, doc_src, ques_src, trg[:,:-1], bleu)
 
         #output = [batch size, trg len - 1, output dim]
         #trg = [batch size, trg len]
@@ -1052,8 +1055,9 @@ def evaluate(model, iterator, criterion):
             doc_src = batch.article
             ques_src = batch.question
             trg = batch.distractor
+            bleu = batch.bleu1
 
-            output, _ = model(ans_src, doc_src, ques_src, trg[:,:-1])
+            output, _ = model(ans_src, doc_src, ques_src, trg[:,:-1], bleu)
 
             #output = [batch size, trg len - 1, output dim]
             #trg = [batch size, trg len]
@@ -1148,7 +1152,7 @@ def create_src_tensor(sentence, src_field):
 
     return src_tensor, src_mask
 
-def translate_sentence(answer, question, document, src_field, trg_field, model, device, max_len = 100):
+def translate_sentence(answer, question, document, bleu, src_field, trg_field, model, device, max_len = 100):
 
     model.eval()
     ans_tensor, ans_src_mask = create_src_tensor(answer, src_field)
@@ -1168,8 +1172,10 @@ def translate_sentence(answer, question, document, src_field, trg_field, model, 
 
         trg_mask = model.make_trg_mask(trg_tensor)
 
+        bleu_tensor = torch.DoubleTensor([bleu]).unsqueeze(0).to(device)
+
         with torch.no_grad():
-            output, attention = model.decoder(trg_tensor, ques_enc_src, trg_mask, ques_src_mask)
+            output, attention = model.decoder(trg_tensor, bleu_tensor, ques_enc_src, trg_mask, ques_src_mask)
 
         pred_token = output.argmax(2)[:,-1].item()
 
@@ -1217,13 +1223,14 @@ ques = vars(train_set.examples[example_idx])['question']
 doc = vars(train_set.examples[example_idx])['article']
 dis = vars(train_set.examples[example_idx])['distractor']
 ans = vars(train_set.examples[example_idx])['answer_text']
+bleu = vars(train_set.examples[example_idx])['bleu1']
 print(f'ques = {ques}')
 print(f'ans = {ans}')
 print(f'dis = {dis}')
-
+print(f'bleu = {bleu}')
 """Our translation looks pretty good, although our model changes *is walking by* to *walks past*. The meaning is still the same."""
 
-translation, attention = translate_sentence(ans, ques, doc, TEXT, TEXT, model, device)
+translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, model, device)
 
 print(f'predicted trg = {translation}')
 
@@ -1239,13 +1246,15 @@ ques = vars(valid_set.examples[example_idx])['question']
 doc = vars(valid_set.examples[example_idx])['article']
 dis = vars(valid_set.examples[example_idx])['distractor']
 ans = vars(train_set.examples[example_idx])['answer_text']
+bleu = vars(train_set.examples[example_idx])['bleu1']
 print(f'ques = {ques}')
 print(f'ans = {ans}')
 print(f'dis = {dis}')
+print(f'bleu = {bleu}')
 
 """The model translates it by switching *is running* to just *running*, but it is an acceptable swap."""
 
-translation, attention = translate_sentence(ans, ques, doc, TEXT, TEXT, model, device)
+translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, model, device)
 
 print(f'predicted trg = {translation}')
 
@@ -1261,13 +1270,14 @@ ques = vars(test_set.examples[example_idx])['question']
 doc = vars(test_set.examples[example_idx])['article']
 dis = vars(test_set.examples[example_idx])['distractor']
 ans = vars(train_set.examples[example_idx])['answer_text']
+bleu = vars(train_set.examples[example_idx])['bleu1']
 print(f'ques = {ques}')
 print(f'ans = {ans}')
 print(f'dis = {dis}')
-
+print(f'bleu = {bleu}')
 """A decent translation with *young* being omitted and *outside* being changed to *outdoors*."""
 
-translation, attention = translate_sentence(ans, ques, doc, TEXT, TEXT, model, device)
+translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, model, device)
 
 print(f'predicted trg = {translation}')
 
@@ -1291,9 +1301,10 @@ def calculate_bleu(data, src_field, trg_field, model, device, max_len = 100):
         ans = vars(datum)['answer_text']
         doc = vars(datum)['article']
         trg = vars(datum)['distractor']
+        bleu = vars(datum)['bleu1']
 
 
-        pred_trg, _ = translate_sentence(ans, ques, doc, src_field, trg_field, model, device, max_len)
+        pred_trg, _ = translate_sentence(ans, ques, doc, bleu, src_field, trg_field, model, device, max_len)
 
         #cut off <eos> token
         pred_trg = pred_trg[:-1]
