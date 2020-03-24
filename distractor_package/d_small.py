@@ -1314,13 +1314,19 @@ def calculate_bleu(data, src_field, trg_field, model, device, max_len = 100):
         print(f'dis = {trg}')
         print(f'predicted = {pred_trg}\n')
 
-    return bleu_score(pred_trgs, trgs, max_n=1, weights=[1.0])
+    return bleu_score(pred_trgs, trgs, max_n=1, weights=[1.0]),
+            bleu_score(pred_trgs, trgs, max_n=2, weights=[1/2]*2),
+            bleu_score(pred_trgs, trgs, max_n=3, weights=[1/3]*3),
+            bleu_score(pred_trgs, trgs, max_n=4, weights=[1/4]*4)
 
 """We get a BLEU score of 36.1, which beats the 33.3 of the convolutional sequence-to-sequence model and 28.2 of the attention based RNN model. All this whilst having the least amount of parameters and the fastest training time!"""
 
-bleu_score = calculate_bleu(test_set, TEXT, TEXT, model, device)
+bleu1_score, bleu2_score, bleu3_score, bleu4_score = calculate_bleu(test_set, TEXT, TEXT, model, device)
 
-print(f'BLEU score = {bleu_score*100:.2f}')
+print(f'BLEU-1 score = {bleu1_score*100:.2f}')
+print(f'BLEU-2 score = {bleu2_score*100:.2f}')
+print(f'BLEU-3 score = {bleu3_score*100:.2f}')
+print(f'BLEU-4 score = {bleu4_score*100:.2f}')
 
 """Congratulations for finishing these tutorials! I hope you've found them useful.
 
