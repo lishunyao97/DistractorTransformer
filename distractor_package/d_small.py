@@ -127,7 +127,7 @@ train_set, valid_set, test_set = data.TabularDataset.splits(
     fields={'question': ('question', TEXT),
             'answer_text': ('answer_text', TEXT),
             'article': ('article', TEXT),
-            'distractor': ('distractor', TEXT),
+            'distractorBleu': ('distractor', TEXT),
             'bleu-1': ('bleu1', SCORE)})
 
 # train_iterator, valid_iterator, test_iterator = data.BucketIterator.splits(
@@ -675,7 +675,7 @@ class Decoder(nn.Module):
         self.hid_dim = hid_dim
         self.tok_embedding = nn.Embedding(output_dim, hid_dim)
         self.pos_embedding = nn.Embedding(max_length, hid_dim)
-        self.bleu_linear = nn.Linear(hid_dim, hid_dim)
+
         self.layers = nn.ModuleList([DecoderLayer(hid_dim,
                                                   n_heads,
                                                   pf_dim,
@@ -703,9 +703,7 @@ class Decoder(nn.Module):
 
         #pos = [batch size, trg len]
 
-        bleu_tensor = bleu.unsqueeze(1).unsqueeze(2).repeat(1, trg_len, self.hid_dim).to(self.device)
-        # print('bleu linear', self.bleu_linear(bleu_tensor).shape)
-        trg = self.dropout((self.tok_embedding(trg) * self.scale) + self.pos_embedding(pos)) + self.bleu_linear(bleu_tensor)
+        trg = self.dropout((self.tok_embedding(trg) * self.scale) + self.pos_embedding(pos))
 
         #trg = [batch size, trg len, hid dim]
 
