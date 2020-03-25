@@ -1087,24 +1087,24 @@ def epoch_time(start_time, end_time):
 
 best_valid_loss = float('inf')
 
-for epoch in range(N_EPOCHS):
-
-    start_time = time.time()
-
-    train_loss = train(model, train_iterator, optimizer, scheduler, criterion, CLIP)
-    valid_loss = evaluate(model, valid_iterator, criterion)
-
-    end_time = time.time()
-
-    epoch_mins, epoch_secs = epoch_time(start_time, end_time)
-
-    if valid_loss < best_valid_loss:
-        best_valid_loss = valid_loss
-        torch.save(model.state_dict(), 'tut6-model.pt')
-
-    print(f'Epoch: {epoch+1:02} | Time: {epoch_mins}m {epoch_secs}s')
-    print(f'\tTrain Loss: {train_loss:.3f} | Train PPL: {math.exp(train_loss):7.3f}')
-    print(f'\t Val. Loss: {valid_loss:.3f} |  Val. PPL: {math.exp(valid_loss):7.3f}')
+# for epoch in range(N_EPOCHS):
+#
+#     start_time = time.time()
+#
+#     train_loss = train(model, train_iterator, optimizer, scheduler, criterion, CLIP)
+#     valid_loss = evaluate(model, valid_iterator, criterion)
+#
+#     end_time = time.time()
+#
+#     epoch_mins, epoch_secs = epoch_time(start_time, end_time)
+#
+#     if valid_loss < best_valid_loss:
+#         best_valid_loss = valid_loss
+#         torch.save(model.state_dict(), 'tut6-model.pt')
+#
+#     print(f'Epoch: {epoch+1:02} | Time: {epoch_mins}m {epoch_secs}s')
+#     print(f'\tTrain Loss: {train_loss:.3f} | Train PPL: {math.exp(train_loss):7.3f}')
+#     print(f'\t Val. Loss: {valid_loss:.3f} |  Val. PPL: {math.exp(valid_loss):7.3f}')
 
 """We load our "best" parameters and manage to achieve a better test perplexity than all previous models."""
 
@@ -1150,7 +1150,7 @@ def create_src_tensor(sentence, src_field):
 
     return src_tensor, src_mask
 
-def translate_sentence(answer, question, document, bleu, src_field, trg_field, model, device, max_len = 100):
+def translate_sentence(answer, question, document, bleu, src_field, trg_field, model, device, max_len = 800):
 
     model.eval()
     ans_tensor, ans_src_mask = create_src_tensor(answer, src_field)
@@ -1170,10 +1170,10 @@ def translate_sentence(answer, question, document, bleu, src_field, trg_field, m
 
         trg_mask = model.make_trg_mask(trg_tensor)
 
-        bleu_tensor = torch.FloatTensor([bleu]).to(device)
+
 
         with torch.no_grad():
-            output, attention = model.decoder(trg_tensor, bleu_tensor, ques_enc_src, trg_mask, ques_src_mask)
+            output, attention = model.decoder(trg_tensor, None, ques_enc_src, trg_mask, ques_src_mask)
 
         pred_token = output.argmax(2)[:,-1].item()
 
@@ -1288,7 +1288,7 @@ Finally we calculate the BLEU score for the Transformer.
 
 from torchtext.data.metrics import bleu_score
 
-def calculate_bleu(data, src_field, trg_field, model, device, max_len = 100):
+def calculate_bleu(data, src_field, trg_field, model, device, max_len = 800):
 
     trgs = []
     pred_trgs = []
@@ -1304,9 +1304,9 @@ def calculate_bleu(data, src_field, trg_field, model, device, max_len = 100):
 
         pred_trg, _ = translate_sentence(ans, ques, doc, bleu, src_field, trg_field, model, device, max_len)
 
-        #cut off <eos> token
-        pred_trg = pred_trg[:-1]
-
+        #cut off <eos> token, cut off special char "b@n"
+        pred_trg = pred_trg[1:-1]
+        trg = trg[1:]
         pred_trgs.append(pred_trg)
         trgs.append([trg])
         print(f'ques = {ques}')
@@ -1314,10 +1314,11 @@ def calculate_bleu(data, src_field, trg_field, model, device, max_len = 100):
         print(f'dis = {trg}')
         print(f'predicted = {pred_trg}\n')
 
-    return bleu_score(pred_trgs, trgs, max_n=1, weights=[1.0]),
-            bleu_score(pred_trgs, trgs, max_n=2, weights=[1/2]*2),
-            bleu_score(pred_trgs, trgs, max_n=3, weights=[1/3]*3),
-            bleu_score(pred_trgs, trgs, max_n=4, weights=[1/4]*4)
+
+    return bleu_score(pred_trgs, trgs, max_n=1, weights=[1.0]), \
+        bleu_score(pred_trgs, trgs, max_n=2, weights=[1/2]*2), \
+        bleu_score(pred_trgs, trgs, max_n=3, weights=[1/3]*3), \
+        bleu_score(pred_trgs, trgs, max_n=4, weights=[1/4]*4)
 
 """We get a BLEU score of 36.1, which beats the 33.3 of the convolutional sequence-to-sequence model and 28.2 of the attention based RNN model. All this whilst having the least amount of parameters and the fastest training time!"""
 
