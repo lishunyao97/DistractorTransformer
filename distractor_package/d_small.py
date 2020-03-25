@@ -48,8 +48,8 @@ batch_size = 32
 N_EPOCHS = 10
 CLIP = 1.0
 LEARNING_RATE = 1e-4
-LR_DECAY = 1.0
-LR_DECAY_EPOCH = 5
+LR_DECAY = 0.5
+LR_DECAY_EPOCH = 2
 
 import json
 def getmaxlen(field):
@@ -75,10 +75,10 @@ def getmaxlen(field):
         maxlen = len(d[field])
   print(field, 'test maxlen', maxlen)
 
-# getmaxlen('article')
-# getmaxlen('question')
-# getmaxlen('answer_text')
-# getmaxlen('distractor')
+getmaxlen('article')
+getmaxlen('question')
+getmaxlen('answer_text')
+getmaxlen('distractor')
 
 
 import torch
@@ -1100,7 +1100,7 @@ best_valid_loss = float('inf')
 #
 #     if valid_loss < best_valid_loss:
 #         best_valid_loss = valid_loss
-#         torch.save(model.state_dict(), 'tut6-model.pt')
+#         torch.save(model.state_dict(), 'tut6-model-epoch'+str(epoch)+'.pt')
 #
 #     print(f'Epoch: {epoch+1:02} | Time: {epoch_mins}m {epoch_secs}s')
 #     print(f'\tTrain Loss: {train_loss:.3f} | Train PPL: {math.exp(train_loss):7.3f}')
@@ -1108,7 +1108,7 @@ best_valid_loss = float('inf')
 
 """We load our "best" parameters and manage to achieve a better test perplexity than all previous models."""
 
-model.load_state_dict(torch.load('tut6-model.pt'))
+model.load_state_dict(torch.load('tut6-model-epoch5.pt'))
 
 test_loss = evaluate(model, test_iterator, criterion)
 
@@ -1150,7 +1150,7 @@ def create_src_tensor(sentence, src_field):
 
     return src_tensor, src_mask
 
-def translate_sentence(answer, question, document, bleu, src_field, trg_field, model, device, max_len = 800):
+def translate_sentence(answer, question, document, bleu, src_field, trg_field, model, device, max_len = 80):
 
     model.eval()
     ans_tensor, ans_src_mask = create_src_tensor(answer, src_field)
@@ -1280,6 +1280,14 @@ translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, mo
 print(f'predicted trg = {translation}')
 
 # display_attention(src, translation, attention)
+ques = ['which', 'of', 'the', 'following', 'is', 'true', 'according', 'to', 'the', 'survey', '?']
+ans = ['there', 'is', 'the', 'same', 'percentage', 'about', 'people', 'preferring', 'a', 'weekend', 'all', 'by', 'themselves', 'and', 'people', 'spending', 'no', 'more', 'than', '500', 'yuan', 'during', 'weekends', '.']
+dis = ['b@0', 'most', 'office', 'workers', 'ca', "n't", 'afford', 'things', 'in', 'supermarkets', ',', 'so', 'they', 'prefer', 'to', 'attend', 'other', 'stores', ',', 'especially', 'when', 'discounts', 'are', 'offered', '.']
+
+translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, model, device)
+
+print(f'special predicted trg = {translation}')
+
 
 """## BLEU
 
@@ -1287,8 +1295,9 @@ Finally we calculate the BLEU score for the Transformer.
 """
 
 from torchtext.data.metrics import bleu_score
+skip_ans = ['there', 'is', 'the', 'same', 'percentage', 'about', 'people', 'preferring', 'a', 'weekend', 'all', 'by', 'themselves', 'and', 'people', 'spending', 'no', 'more', 'than', '500', 'yuan', 'during', 'weekends', '.']
 
-def calculate_bleu(data, src_field, trg_field, model, device, max_len = 800):
+def calculate_bleu(data, src_field, trg_field, model, device, max_len = 80):
 
     trgs = []
     pred_trgs = []
@@ -1300,7 +1309,12 @@ def calculate_bleu(data, src_field, trg_field, model, device, max_len = 800):
         doc = vars(datum)['article']
         trg = vars(datum)['distractor']
         bleu = vars(datum)['bleu1']
+        if ans==skip_ans:
+            continue
 
+        print(f'ques = {ques}')
+        print(f'ans = {ans}')
+        print(f'dis = {trg}')
 
         pred_trg, _ = translate_sentence(ans, ques, doc, bleu, src_field, trg_field, model, device, max_len)
 
@@ -1309,9 +1323,6 @@ def calculate_bleu(data, src_field, trg_field, model, device, max_len = 800):
         trg = trg[1:]
         pred_trgs.append(pred_trg)
         trgs.append([trg])
-        print(f'ques = {ques}')
-        print(f'ans = {ans}')
-        print(f'dis = {trg}')
         print(f'predicted = {pred_trg}\n')
 
 
