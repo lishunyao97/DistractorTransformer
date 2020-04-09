@@ -75,10 +75,10 @@ def getmaxlen(field):
         maxlen = len(d[field])
   print(field, 'test maxlen', maxlen)
 
-getmaxlen('article')
-getmaxlen('question')
-getmaxlen('answer_text')
-getmaxlen('distractor')
+# getmaxlen('article')
+# getmaxlen('question')
+# getmaxlen('answer_text')
+# getmaxlen('distractor')
 
 
 import torch
@@ -276,11 +276,11 @@ class DocumentEncoder(nn.Module):
         #src = [batch size, src len, hid dim]
 
         for layer in self.layers:
-            src = layer(src, ans_enc, src_mask, ans_mask)
+            src, att = layer(src, ans_enc, src_mask, ans_mask)
 
         #src = [batch size, src len, hid dim]
 
-        return src
+        return src, att
 
 class QuestionEncoder(nn.Module):
     def __init__(self,
@@ -462,7 +462,7 @@ class DocumentEncoderLayer(nn.Module):
 
         #src = [batch size, src len, hid dim]
 
-        return src
+        return src, attention
 
 class QuestionEncoderLayer(nn.Module):
     def __init__(self,
@@ -874,7 +874,7 @@ class Seq2Seq(nn.Module):
         #src_mask = [batch size, 1, 1, src len]
         #trg_mask = [batch size, 1, trg len, trg len]
         ans_enc_src = self.ans_encoder(ans_src, ans_src_mask)
-        doc_enc_src = self.doc_encoder(doc_src, ans_enc_src, doc_src_mask, ans_src_mask)
+        doc_enc_src, att = self.doc_encoder(doc_src, ans_enc_src, doc_src_mask, ans_src_mask)
         ques_enc_src = self.ques_encoder(ques_src, doc_enc_src, ques_src_mask, doc_src_mask)
 
         #enc_src = [batch size, src len, hid dim]
@@ -893,11 +893,11 @@ We can now define our encoder and decoders. This model is significantly smaller 
 
 INPUT_DIM = len(TEXT.vocab)
 OUTPUT_DIM = len(TEXT.vocab)
-HID_DIM = 256
-ENC_LAYERS = 3
-DEC_LAYERS = 3
-ENC_HEADS = 8
-DEC_HEADS = 8
+HID_DIM = 512
+ENC_LAYERS = 1
+DEC_LAYERS = 1
+ENC_HEADS = 1
+DEC_HEADS = 1
 ENC_PF_DIM = 512
 DEC_PF_DIM = 512
 ENC_DROPOUT = 0.1
@@ -1108,7 +1108,7 @@ best_valid_loss = float('inf')
 
 """We load our "best" parameters and manage to achieve a better test perplexity than all previous models."""
 
-model.load_state_dict(torch.load('tut6-model-epoch5.pt'))
+model.load_state_dict(torch.load('save/tut6-model-epoch3.pt'))
 
 test_loss = evaluate(model, test_iterator, criterion)
 
@@ -1159,7 +1159,7 @@ def translate_sentence(answer, question, document, bleu, src_field, trg_field, m
 
     with torch.no_grad():
         ans_enc_src = model.ans_encoder(ans_tensor, ans_src_mask)
-        doc_enc_src = model.doc_encoder(doc_tensor, ans_enc_src, doc_src_mask, ans_src_mask)
+        doc_enc_src, att = model.doc_encoder(doc_tensor, ans_enc_src, doc_src_mask, ans_src_mask)
         ques_enc_src = model.ques_encoder(ques_tensor, doc_enc_src, ques_src_mask, doc_src_mask)
 
     trg_indexes = [trg_field.vocab.stoi[trg_field.init_token]]
@@ -1188,11 +1188,11 @@ def translate_sentence(answer, question, document, bleu, src_field, trg_field, m
 
 """We'll now define a function that displays the attention over the source sentence for each step of the decoding. As this model has 8 heads our model we can view the attention for each of the heads."""
 
-def display_attention(sentence, translation, attention, n_heads = 8, n_rows = 4, n_cols = 2):
+def display_attention(sentence, translation, attention, n_heads = 1, n_rows = 1, n_cols = 1):
 
     assert n_rows * n_cols == n_heads
 
-    fig = plt.figure(figsize=(15,25))
+    fig = plt.figure(figsize=(15,655))
 
     for i in range(n_heads):
 
@@ -1200,7 +1200,7 @@ def display_attention(sentence, translation, attention, n_heads = 8, n_rows = 4,
 
         _attention = attention.squeeze(0)[i].cpu().detach().numpy()
 
-        cax = ax.matshow(_attention, cmap='bone')
+        cax = ax.matshow(_attention, cmap='bone', aspect="auto")
 
         ax.tick_params(labelsize=12)
         ax.set_xticklabels(['']+['<sos>']+[t.lower() for t in sentence]+['<eos>'],
@@ -1211,7 +1211,8 @@ def display_attention(sentence, translation, attention, n_heads = 8, n_rows = 4,
         ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
 
     plt.show()
-    plt.close()
+    plt.savefig("fig.png")
+    # plt.close()
 
 """First, we'll get an example from the training set."""
 
@@ -1234,7 +1235,7 @@ print(f'predicted trg = {translation}')
 
 """We can see the attention from each head below. Each is certainly different, but it's difficult (perhaps impossible) to reason about what head has actually learned to pay attention to. Some heads pay full attention to "eine" when translating "a", some don't at all, and some do a little. They all seem to follow the similar "downward staircase" pattern and the attention when outputting the last two tokens is equally spread over the final two tokens in the input sentence."""
 
-# display_attention(src, translation, attention)
+# display_attention(ans, doc, att)
 
 """Next, let's get an example the model has not been trained on from the validation set."""
 
@@ -1301,6 +1302,8 @@ def calculate_bleu(data, src_field, trg_field, model, device, max_len = 80):
 
     trgs = []
     pred_trgs = []
+    trgs_filter = []
+    pred_trgs_filter = []
 
     for datum in data:
 
@@ -1309,12 +1312,12 @@ def calculate_bleu(data, src_field, trg_field, model, device, max_len = 80):
         doc = vars(datum)['article']
         trg = vars(datum)['distractor']
         bleu = vars(datum)['bleu1']
-        if ans==skip_ans:
-            continue
+        # if ans==skip_ans:
+        #     continue
 
-        print(f'ques = {ques}')
-        print(f'ans = {ans}')
-        print(f'dis = {trg}')
+        # print(f'ques = {ques}')
+        # print(f'ans = {ans}')
+        # print(f'dis = {trg}')
 
         pred_trg, _ = translate_sentence(ans, ques, doc, bleu, src_field, trg_field, model, device, max_len)
 
@@ -1323,22 +1326,38 @@ def calculate_bleu(data, src_field, trg_field, model, device, max_len = 80):
         trg = trg[1:]
         pred_trgs.append(pred_trg)
         trgs.append([trg])
-        print(f'predicted = {pred_trg}\n')
+        # print(f'predicted = {pred_trg}\n')
+        bleu_filter = bleu_score([pred_trg], [[ans]], max_n=1, weights=[1.0])
+        if 0.1<bleu_filter<0.4:
+            pred_trgs_filter.append(pred_trg)
+            trgs_filter.append([trg])
 
-
+    orinum = len(pred_trgs)
+    newnum = len(pred_trgs_filter)
+    print(f'original number = {orinum}')
+    print(f'new number = {newnum}')
     return bleu_score(pred_trgs, trgs, max_n=1, weights=[1.0]), \
-        bleu_score(pred_trgs, trgs, max_n=2, weights=[1/2]*2), \
-        bleu_score(pred_trgs, trgs, max_n=3, weights=[1/3]*3), \
-        bleu_score(pred_trgs, trgs, max_n=4, weights=[1/4]*4)
+        bleu_score(pred_trgs, trgs, max_n=2, weights=[1.0/2]*2), \
+        bleu_score(pred_trgs, trgs, max_n=3, weights=[1.0/3]*3), \
+        bleu_score(pred_trgs, trgs, max_n=4, weights=[1.0/4]*4), \
+        bleu_score(pred_trgs_filter, trgs_filter, max_n=1, weights=[1.0]), \
+        bleu_score(pred_trgs_filter, trgs_filter, max_n=2, weights=[1.0/2]*2), \
+        bleu_score(pred_trgs_filter, trgs_filter, max_n=3, weights=[1.0/3]*3), \
+        bleu_score(pred_trgs_filter, trgs_filter, max_n=4, weights=[1.0/4]*4)
 
 """We get a BLEU score of 36.1, which beats the 33.3 of the convolutional sequence-to-sequence model and 28.2 of the attention based RNN model. All this whilst having the least amount of parameters and the fastest training time!"""
 
-bleu1_score, bleu2_score, bleu3_score, bleu4_score = calculate_bleu(test_set, TEXT, TEXT, model, device)
+bleu1_score, bleu2_score, bleu3_score, bleu4_score, bleu1_score_filter, bleu2_score_filter, bleu3_score_filter, bleu4_score_filter = calculate_bleu(test_set, TEXT, TEXT, model, device)
 
 print(f'BLEU-1 score = {bleu1_score*100:.2f}')
 print(f'BLEU-2 score = {bleu2_score*100:.2f}')
 print(f'BLEU-3 score = {bleu3_score*100:.2f}')
 print(f'BLEU-4 score = {bleu4_score*100:.2f}')
+
+print(f'BLEU-1 filter score = {bleu1_score_filter*100:.2f}')
+print(f'BLEU-2 filter score = {bleu2_score_filter*100:.2f}')
+print(f'BLEU-3 filter score = {bleu3_score_filter*100:.2f}')
+print(f'BLEU-4 filter score = {bleu4_score_filter*100:.2f}')
 
 """Congratulations for finishing these tutorials! I hope you've found them useful.
 
