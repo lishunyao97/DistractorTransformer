@@ -8,30 +8,6 @@ Original file is located at
 
 # 6 - Attention is All You Need
 
-In this notebook we will be implementing a (slightly modified version) of the Transformer model from the [Attention is All You Need](https://arxiv.org/abs/1706.03762) paper. All images in this notebook will be taken from the Transformer paper. For more information about the Transformer, [see](https://www.mihaileric.com/posts/transformers-attention-in-disguise/) [these](https://jalammar.github.io/illustrated-transformer/) [three](http://nlp.seas.harvard.edu/2018/04/03/attention.html) articles.
-
-![](https://github.com/bentrevett/pytorch-seq2seq/blob/master/assets/transformer1.png?raw=1)
-
-## Introduction
-
-Similar to the Convolutional Sequence-to-Sequence model, the Transformer does not use any recurrence. It also does not use any convolutional layers. Instead the model is entirely made up of linear layers, attention mechanisms and normalization.
-
-As of January 2020, Transformers are the dominant architecture in NLP and are used to achieve state-of-the-art results for many tasks and it appears as if they will be for the near future.
-
-The most popular Transformer variant is [BERT](https://arxiv.org/abs/1810.04805) (**B**idirectional **E**ncoder **R**epresentations from **T**ransformers) and pre-trained versions of BERT are commonly used to replace the embedding layers - if not more - in NLP models.
-
-A common library used when dealing with pre-trained transformers is the [Transformers](https://huggingface.co/transformers/) library, see [here](https://huggingface.co/transformers/pretrained_models.html) for a list of all pre-trained models available.
-
-The differences between the implementation in this notebook and the paper are:
-- we use a learned positional encoding instead of a static one
-- we use the standard Adam optimizer with a static learning rate instead of one with warm-up and cool-down steps
-- we do not use label smoothing
-
-We make all of these changes as they closely follow BERT's set-up and the majority of Transformer variants use a similar set-up.
-
-## Preparing the Data
-
-As always, let's import all the required modules and set the random seeds for reproducability.
 """
 #
 # !nvidia-smi
@@ -138,7 +114,7 @@ valid_iterator = data.Iterator(valid_set, batch_size=batch_size, sort_key=lambda
 test_iterator = data.Iterator(test_set, batch_size=batch_size, sort_key=lambda x: len(x.question), shuffle=False, device=device)
 # TEXT.build_vocab(train.question, train.answer_text, train.article, train.distractor,
 #                  valid.question, valid.answer_text, valid.article, valid.diatractor)
-TEXT.build_vocab(train_set, valid_set, min_freq=3)
+TEXT.build_vocab(train_set, valid_set, min_freq=1)
 
 
 
@@ -179,7 +155,7 @@ The combined embeddings are then passed through $N$ *encoder layers* to get $Z$,
 
 The source mask, `src_mask`, is simply the same shape as the source sentence but has a value of 1 when the token in the source sentence is not a `<pad>` token and 0 when it is a `<pad>` token. This is used in the encoder layers to mask the multi-head attention mechanisms, which are used to calculate and apply attention over the source sentence, so the model does not pay attention to `<pad>` tokens, which contain no useful information.
 """
-class AnswerEncoder(nn.Module):
+class QuestionEncoder(nn.Module):
     def __init__(self,
                  input_dim,
                  hid_dim,
@@ -188,7 +164,7 @@ class AnswerEncoder(nn.Module):
                  pf_dim,
                  dropout,
                  device,
-                 max_length = 42):
+                 max_length = 72):
         super().__init__()
 
         self.device = device
@@ -196,7 +172,7 @@ class AnswerEncoder(nn.Module):
         self.tok_embedding = nn.Embedding(input_dim, hid_dim)
         self.pos_embedding = nn.Embedding(max_length, hid_dim)
 
-        self.layers = nn.ModuleList([AnswerEncoderLayer(hid_dim,
+        self.layers = nn.ModuleList([QuestionEncoderLayer(hid_dim,
                                                   n_heads,
                                                   pf_dim,
                                                   dropout,
@@ -259,7 +235,7 @@ class DocumentEncoder(nn.Module):
 
         self.scale = torch.sqrt(torch.FloatTensor([hid_dim])).to(device)
 
-    def forward(self, src, ans_enc, src_mask, ans_mask):
+    def forward(self, src, ques_enc, src_mask, ques_mask):
 
         #src = [batch size, src len]
         #src_mask = [batch size, src len]
@@ -276,13 +252,13 @@ class DocumentEncoder(nn.Module):
         #src = [batch size, src len, hid dim]
 
         for layer in self.layers:
-            src, att = layer(src, ans_enc, src_mask, ans_mask)
+            src, att = layer(src, ques_enc, src_mask, ques_mask)
 
         #src = [batch size, src len, hid dim]
 
         return src, att
 
-class QuestionEncoder(nn.Module):
+class AnswerEncoder(nn.Module):
     def __init__(self,
                  input_dim,
                  hid_dim,
@@ -291,7 +267,7 @@ class QuestionEncoder(nn.Module):
                  pf_dim,
                  dropout,
                  device,
-                 max_length = 72):
+                 max_length = 42):
         super().__init__()
 
         self.device = device
@@ -299,7 +275,7 @@ class QuestionEncoder(nn.Module):
         self.tok_embedding = nn.Embedding(input_dim, hid_dim)
         self.pos_embedding = nn.Embedding(max_length, hid_dim)
 
-        self.layers = nn.ModuleList([QuestionEncoderLayer(hid_dim,
+        self.layers = nn.ModuleList([AnswerEncoderLayer(hid_dim,
                                                   n_heads,
                                                   pf_dim,
                                                   dropout,
@@ -332,6 +308,10 @@ class QuestionEncoder(nn.Module):
         #src = [batch size, src len, hid dim]
 
         return src
+
+
+
+
 
 """### Encoder Layer
 
@@ -381,7 +361,7 @@ class EncoderLayer(nn.Module):
 
         return src
 
-class AnswerEncoderLayer(nn.Module):
+class QuestionEncoderLayer(nn.Module):
     def __init__(self,
                  hid_dim,
                  n_heads,
@@ -437,7 +417,7 @@ class DocumentEncoderLayer(nn.Module):
                                                                      dropout)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, src, enc_ans, src_mask, ans_mask):
+    def forward(self, src, enc_ques, src_mask, ques_mask):
 
         #src = [batch size, src len, hid dim]
         #src_mask = [batch size, src len]
@@ -450,7 +430,7 @@ class DocumentEncoderLayer(nn.Module):
 
         #src = [batch size, src len, hid dim]
         #encoder attention
-        _src, attention = self.encoder_attention(src, enc_ans, enc_ans, ans_mask)
+        _src, attention = self.encoder_attention(src, enc_ques, enc_ques, ques_mask)
 
         #dropout, residual connection and layer norm
         src = self.layer_norm(src + self.dropout(_src))
@@ -464,7 +444,7 @@ class DocumentEncoderLayer(nn.Module):
 
         return src, attention
 
-class QuestionEncoderLayer(nn.Module):
+class AnswerEncoderLayer(nn.Module):
     def __init__(self,
                  hid_dim,
                  n_heads,
@@ -480,7 +460,6 @@ class QuestionEncoderLayer(nn.Module):
                                                                      pf_dim,
                                                                      dropout)
         self.dropout = nn.Dropout(dropout)
-
     def forward(self, src, enc_doc, src_mask, doc_mask):
 
         #src = [batch size, src len, hid dim]
@@ -507,6 +486,11 @@ class QuestionEncoderLayer(nn.Module):
         #src = [batch size, src len, hid dim]
 
         return src
+
+
+
+
+
 
 """### Mutli Head Attention Layer
 
@@ -824,9 +808,9 @@ class Seq2Seq(nn.Module):
                  trg_pad_idx,
                  device):
         super().__init__()
-        self.ans_encoder = ans_encoder
-        self.doc_encoder = doc_encoder
         self.ques_encoder = ques_encoder
+        self.doc_encoder = doc_encoder
+        self.ans_encoder = ans_encoder
         self.decoder = decoder
         self.src_pad_idx = src_pad_idx
         self.trg_pad_idx = trg_pad_idx
@@ -854,6 +838,7 @@ class Seq2Seq(nn.Module):
 
         trg_sub_mask = torch.tril(torch.ones((trg_len, trg_len), device = self.device)).bool()
 
+
         #trg_sub_mask = [trg len, trg len]
 
         trg_mask = trg_pad_mask & trg_sub_mask
@@ -866,20 +851,20 @@ class Seq2Seq(nn.Module):
 
         #src = [batch size, src len]
         #trg = [batch size, trg len]
-        ans_src_mask = self.make_src_mask(ans_src)
-        doc_src_mask = self.make_src_mask(doc_src)
         ques_src_mask = self.make_src_mask(ques_src)
+        doc_src_mask = self.make_src_mask(doc_src)
+        ans_src_mask = self.make_src_mask(ans_src)
         trg_mask = self.make_trg_mask(trg)
 
         #src_mask = [batch size, 1, 1, src len]
         #trg_mask = [batch size, 1, trg len, trg len]
-        ans_enc_src = self.ans_encoder(ans_src, ans_src_mask)
-        doc_enc_src, att = self.doc_encoder(doc_src, ans_enc_src, doc_src_mask, ans_src_mask)
-        ques_enc_src = self.ques_encoder(ques_src, doc_enc_src, ques_src_mask, doc_src_mask)
+        ques_enc_src = self.ques_encoder(ques_src, ques_src_mask)
+        doc_enc_src, att = self.doc_encoder(doc_src, ques_enc_src, doc_src_mask, ques_src_mask)
+        ans_enc_src = self.ans_encoder(ans_src, doc_enc_src, ans_src_mask, doc_src_mask)
 
         #enc_src = [batch size, src len, hid dim]
 
-        output, attention = self.decoder(trg, bleu, ques_enc_src, trg_mask, ques_src_mask)
+        output, attention = self.decoder(trg, bleu, ans_enc_src, trg_mask, ans_src_mask)
 
         #output = [batch size, trg len, output dim]
         #attention = [batch size, n heads, trg len, src len]
@@ -1012,7 +997,7 @@ def train(model, iterator, optimizer, scheduler, criterion, clip):
 
         optimizer.zero_grad()
 
-        output, _ = model(ans_src, doc_src, ques_src, trg[:,:-1], bleu)
+        output, _ = model(ans_src, doc_src, ques_src, trg[:,1:-1], bleu)
 
         #output = [batch size, trg len - 1, output dim]
         #trg = [batch size, trg len]
@@ -1020,7 +1005,7 @@ def train(model, iterator, optimizer, scheduler, criterion, clip):
         output_dim = output.shape[-1]
 
         output = output.contiguous().view(-1, output_dim)
-        trg = trg[:,1:].contiguous().view(-1)
+        trg = trg[:,2:].contiguous().view(-1)
 
         #output = [batch size * trg len - 1, output dim]
         #trg = [batch size * trg len - 1]
@@ -1055,7 +1040,7 @@ def evaluate(model, iterator, criterion):
             trg = batch.distractor
             bleu = batch.bleu1
 
-            output, _ = model(ans_src, doc_src, ques_src, trg[:,:-1], bleu)
+            output, _ = model(ans_src, doc_src, ques_src, trg[:,1:-1], bleu)
 
             #output = [batch size, trg len - 1, output dim]
             #trg = [batch size, trg len]
@@ -1063,7 +1048,7 @@ def evaluate(model, iterator, criterion):
             output_dim = output.shape[-1]
 
             output = output.contiguous().view(-1, output_dim)
-            trg = trg[:,1:].contiguous().view(-1)
+            trg = trg[:,2:].contiguous().view(-1)
 
             #output = [batch size * trg len - 1, output dim]
             #trg = [batch size * trg len - 1]
@@ -1100,7 +1085,7 @@ best_valid_loss = float('inf')
 #
 #     if valid_loss < best_valid_loss:
 #         best_valid_loss = valid_loss
-#         torch.save(model.state_dict(), 'tut6-model-epoch'+str(epoch)+'.pt')
+#     torch.save(model.state_dict(), 'tut6-model-epoch'+str(epoch)+'.pt')
 #
 #     print(f'Epoch: {epoch+1:02} | Time: {epoch_mins}m {epoch_secs}s')
 #     print(f'\tTrain Loss: {train_loss:.3f} | Train PPL: {math.exp(train_loss):7.3f}')
@@ -1108,7 +1093,7 @@ best_valid_loss = float('inf')
 
 """We load our "best" parameters and manage to achieve a better test perplexity than all previous models."""
 
-model.load_state_dict(torch.load('save/tut6-model-epoch3.pt'))
+model.load_state_dict(torch.load('save/tut6-model-epoch6.pt'))
 
 test_loss = evaluate(model, test_iterator, criterion)
 
@@ -1150,7 +1135,7 @@ def create_src_tensor(sentence, src_field):
 
     return src_tensor, src_mask
 
-def translate_sentence(answer, question, document, bleu, src_field, trg_field, model, device, max_len = 80):
+def translate_sentence(answer, question, document, bleu, src_field, trg_field, model, device, target_bleu, max_len = 80):
 
     model.eval()
     ans_tensor, ans_src_mask = create_src_tensor(answer, src_field)
@@ -1158,11 +1143,11 @@ def translate_sentence(answer, question, document, bleu, src_field, trg_field, m
     doc_tensor, doc_src_mask = create_src_tensor(document, src_field)
 
     with torch.no_grad():
-        ans_enc_src = model.ans_encoder(ans_tensor, ans_src_mask)
-        doc_enc_src, att = model.doc_encoder(doc_tensor, ans_enc_src, doc_src_mask, ans_src_mask)
-        ques_enc_src = model.ques_encoder(ques_tensor, doc_enc_src, ques_src_mask, doc_src_mask)
+        ques_enc_src = model.ques_encoder(ques_tensor, ques_src_mask)
+        doc_enc_src, att = model.doc_encoder(doc_tensor, ques_enc_src, doc_src_mask, ques_src_mask)
+        ans_enc_src = model.ans_encoder(ans_tensor, doc_enc_src, ans_src_mask, doc_src_mask)
 
-    trg_indexes = [trg_field.vocab.stoi[trg_field.init_token]]
+    trg_indexes = [trg_field.vocab.stoi[target_bleu]]
 
     for i in range(max_len):
 
@@ -1173,7 +1158,7 @@ def translate_sentence(answer, question, document, bleu, src_field, trg_field, m
 
 
         with torch.no_grad():
-            output, attention = model.decoder(trg_tensor, None, ques_enc_src, trg_mask, ques_src_mask)
+            output, attention = model.decoder(trg_tensor, None, ans_enc_src, trg_mask, ans_src_mask)
 
         pred_token = output.argmax(2)[:,-1].item()
 
@@ -1229,7 +1214,16 @@ print(f'dis = {dis}')
 print(f'bleu = {bleu}')
 """Our translation looks pretty good, although our model changes *is walking by* to *walks past*. The meaning is still the same."""
 
-translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, model, device)
+translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, model, device, 'b@4')
+
+print(f'predicted trg = {translation}')
+translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, model, device, 'b@5')
+
+print(f'predicted trg = {translation}')
+translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, model, device, 'b@6')
+
+print(f'predicted trg = {translation}')
+translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, model, device, 'b@7')
 
 print(f'predicted trg = {translation}')
 
@@ -1253,7 +1247,7 @@ print(f'bleu = {bleu}')
 
 """The model translates it by switching *is running* to just *running*, but it is an acceptable swap."""
 
-translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, model, device)
+translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, model, device, 'b@4')
 
 print(f'predicted trg = {translation}')
 
@@ -1276,7 +1270,7 @@ print(f'dis = {dis}')
 print(f'bleu = {bleu}')
 """A decent translation with *young* being omitted and *outside* being changed to *outdoors*."""
 
-translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, model, device)
+translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, model, device, 'b@4')
 
 print(f'predicted trg = {translation}')
 
@@ -1285,7 +1279,7 @@ ques = ['which', 'of', 'the', 'following', 'is', 'true', 'according', 'to', 'the
 ans = ['there', 'is', 'the', 'same', 'percentage', 'about', 'people', 'preferring', 'a', 'weekend', 'all', 'by', 'themselves', 'and', 'people', 'spending', 'no', 'more', 'than', '500', 'yuan', 'during', 'weekends', '.']
 dis = ['b@0', 'most', 'office', 'workers', 'ca', "n't", 'afford', 'things', 'in', 'supermarkets', ',', 'so', 'they', 'prefer', 'to', 'attend', 'other', 'stores', ',', 'especially', 'when', 'discounts', 'are', 'offered', '.']
 
-translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, model, device)
+translation, attention = translate_sentence(ans, ques, doc, bleu, TEXT, TEXT, model, device, 'b@4')
 
 print(f'special predicted trg = {translation}')
 
@@ -1296,7 +1290,6 @@ Finally we calculate the BLEU score for the Transformer.
 """
 
 from torchtext.data.metrics import bleu_score
-skip_ans = ['there', 'is', 'the', 'same', 'percentage', 'about', 'people', 'preferring', 'a', 'weekend', 'all', 'by', 'themselves', 'and', 'people', 'spending', 'no', 'more', 'than', '500', 'yuan', 'during', 'weekends', '.']
 
 def calculate_bleu(data, src_field, trg_field, model, device, max_len = 80):
 
@@ -1304,6 +1297,7 @@ def calculate_bleu(data, src_field, trg_field, model, device, max_len = 80):
     pred_trgs = []
     trgs_filter = []
     pred_trgs_filter = []
+    target_bleu_list = ['b@0', 'b@1', 'b@2', 'b@3', 'b@4', 'b@5', 'b@6', 'b@7', 'b@8', 'b@9']
 
     for datum in data:
 
@@ -1312,23 +1306,31 @@ def calculate_bleu(data, src_field, trg_field, model, device, max_len = 80):
         doc = vars(datum)['article']
         trg = vars(datum)['distractor']
         bleu = vars(datum)['bleu1']
-        # if ans==skip_ans:
-        #     continue
 
-        # print(f'ques = {ques}')
-        # print(f'ans = {ans}')
-        # print(f'dis = {trg}')
 
-        pred_trg, _ = translate_sentence(ans, ques, doc, bleu, src_field, trg_field, model, device, max_len)
+        print('ques = '+' '.join(ques))
+        print('ans = '+' '.join(ans))
 
-        #cut off <eos> token, cut off special char "b@n"
-        pred_trg = pred_trg[1:-1]
         trg = trg[1:]
-        pred_trgs.append(pred_trg)
+        print('trg = '+' '.join(trg))
+        max_bleu = 0
+        max_pred_trg = ''
+        for target_bleu in target_bleu_list:
+            pred_trg, _ = translate_sentence(ans, ques, doc, bleu, src_field, trg_field, model, device, target_bleu, max_len)
+            print(target_bleu + ' : '+' '.join(pred_trg))
+            #cut off <eos> token, cut off special char "b@n"
+            pred_trg = pred_trg[:-1]
+            bleu_filter = bleu_score([pred_trg], [[ans]], max_n=1, weights=[1.0])
+            print(bleu_filter)
+            if bleu_filter > max_bleu:
+                max_pred_trg = pred_trg
+                max_bleu = bleu_filter
+        pred_trgs.append(max_pred_trg)
         trgs.append([trg])
-        # print(f'predicted = {pred_trg}\n')
+        print('predicted = '+' '.join(max_pred_trg))
+        print()
         bleu_filter = bleu_score([pred_trg], [[ans]], max_n=1, weights=[1.0])
-        if 0.1<bleu_filter<0.4:
+        if 0.2<bleu_filter<0.6:
             pred_trgs_filter.append(pred_trg)
             trgs_filter.append([trg])
 
@@ -1345,7 +1347,6 @@ def calculate_bleu(data, src_field, trg_field, model, device, max_len = 80):
         bleu_score(pred_trgs_filter, trgs_filter, max_n=3, weights=[1.0/3]*3), \
         bleu_score(pred_trgs_filter, trgs_filter, max_n=4, weights=[1.0/4]*4)
 
-"""We get a BLEU score of 36.1, which beats the 33.3 of the convolutional sequence-to-sequence model and 28.2 of the attention based RNN model. All this whilst having the least amount of parameters and the fastest training time!"""
 
 bleu1_score, bleu2_score, bleu3_score, bleu4_score, bleu1_score_filter, bleu2_score_filter, bleu3_score_filter, bleu4_score_filter = calculate_bleu(test_set, TEXT, TEXT, model, device)
 
@@ -1358,8 +1359,3 @@ print(f'BLEU-1 filter score = {bleu1_score_filter*100:.2f}')
 print(f'BLEU-2 filter score = {bleu2_score_filter*100:.2f}')
 print(f'BLEU-3 filter score = {bleu3_score_filter*100:.2f}')
 print(f'BLEU-4 filter score = {bleu4_score_filter*100:.2f}')
-
-"""Congratulations for finishing these tutorials! I hope you've found them useful.
-
-If you find any mistakes or want to ask any questions about any of the code or explanations used, feel free to submit a GitHub issue and I will try to correct it ASAP.
-"""
